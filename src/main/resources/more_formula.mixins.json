@@ -1,0 +1,22 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.minecart.more_formula.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BasinOperatingBlockEntityMixin",
+    "CMMMechanicalPressBlockEntityMixin",
+    "CMMSpoutBlockEntityMixin",
+    "MechanicalPressBlockEntityMixin",
+    "SawBlockEntityMixin",
+    "SpoutBlockEntityMixin"
+  ],
+  "client": [
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

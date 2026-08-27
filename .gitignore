@@ -1,0 +1,28 @@
+# Gradle and build output
+.gradle/
+build/
+
+# Minecraft development runtime
+run/
+
+# IDE metadata
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# Local dependency/cache artifacts
+temp_kubejs_create.zip
+temp_kubejs_create_extract/
+
+# Local or potentially sensitive test configuration
+vless-test.yaml
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

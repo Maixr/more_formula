@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.minecart.more_formula.compat.kubejs.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "plugin": "org.minecart.more_formula.compat.kubejs.MoreFormulaKubeJSMixinConfigPlugin",
+  "mixins": [
+    "KubeRecipeTierMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
