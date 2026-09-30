@@ -4,6 +4,10 @@
 
 配方可以要求黄铜、下界合金、末影、超越或创造级机器才能处理。所有门槛都通过 KubeJS 配置，并兼容 KubeJS-Create 的 Create 配方脚本 API。
 
+本mod由ai辅助开发
+
+目前版本有个bug，体现为无法热重载/reload，必须大退游戏后才可加载新配方
+
 ## 依赖
 
 以下依赖全部必需：
@@ -87,13 +91,13 @@ ServerEvents.recipes(event => {
 
 可以设置门槛的类型：
 
-- `create:pressing`：高级压机
-- `create:mixing`：高级搅拌器和高级盆
-- `create:compacting`：高级压机和高级盆
-- `create:filling`：高级喷口
-- `create:deploying`：高级部署器
-- `create:item_application`：高级部署器
-- `create:sequenced_assembly`：压机、喷口和部署器组成的序列装配线
+- `create:pressing`：动力辊压机
+- `create:mixing`：动力搅拌器和工作盆
+- `create:compacting`：动力辊压机和工作盆
+- `create:filling`：注液器
+- `create:deploying`：机械手
+- `create:item_application`：拿物品的机械手
+- `create:sequenced_assembly`：序列装配线
 
 以下类型没有对应的 CMM 高级机器，因此不建议设置门槛：
 
@@ -111,8 +115,8 @@ ServerEvents.recipes(event => {
 ```js
 // 精确设置
 MoreFormula.setTier(
-    'create:sequenced_assembly/precision_mechanism',
-    Tier.END
+    'create:sequenced_assembly/precision_mechanism',   //配方id
+    Tier.END                                           //设置等级
 )
 
 // 为指定前缀的配方设置门槛
