@@ -96,6 +96,7 @@ ServerEvents.recipes(event => {
     ).transitionalItem(transitional).loops(2).tier(Tier.BEYOND)
 }
 ```
+#### [更多kjs使用说明点我](./docs/KubeJS使用说明.md)
 
 ### 修改脚本后在游戏中执行（当前版本有bug无法热重载）：
 
