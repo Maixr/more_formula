@@ -10,7 +10,7 @@
 
 ## 依赖
 
-以下依赖全部必需：
+以下依赖**全部**必需：
 
 | 依赖 | 版本要求 |
 |------|----------|
@@ -24,9 +24,9 @@
 ## 功能
 
 - 为 Create 配方设置机器等级门槛。
-- 支持压机、混合、压实、浇注、部署、物品施用和序列装配。
+- 支持辊压、搅拌、注液器、机械手、和序列装配。
 - 为 JEI 注册按等级区分的配方分类标签。
-- JEI 中显示对应等级的 CMM 高级机器动画和催化剂。
+- JEI 中显示对应等级的 CMM **高级机器动画**和催化剂。
 - 支持创造级专属配方。
 - 支持按配方 ID 精确设置门槛和按前缀批量设置门槛。
 - 不使用 TOML 配置文件。
@@ -59,10 +59,10 @@
 ServerEvents.recipes(event => {
     // 需要末影级压机
     event.recipes.create.pressing(
-        'minecraft:iron_block',
-        'minecraft:iron_ingot'
-    ).id('example:end_pressing')
-        .tier(Tier.END)
+        'minecraft:iron_block',   //产物
+        'minecraft:iron_ingot'    //反应物
+    ).id('example:end_pressing')  //配方id
+        .tier(Tier.END)           //机器等级
 
     // 需要下界合金级，并且必须加热
     event.recipes.create.mixing(
@@ -81,9 +81,9 @@ ServerEvents.recipes(event => {
 })
 ```
 
-修改脚本后在游戏中执行：
+修改脚本后在游戏中执行（当前版本有bug无法热重载）：
 
-```text
+```指令
 /reload
 ```
 
@@ -97,7 +97,7 @@ ServerEvents.recipes(event => {
 - `create:filling`：注液器
 - `create:deploying`：机械手
 - `create:item_application`：拿物品的机械手
-- `create:sequenced_assembly`：序列装配线
+- `create:sequenced_assembly`：序列装配
 
 以下类型没有对应的 CMM 高级机器，因此不建议设置门槛：
 
