@@ -98,7 +98,7 @@ ServerEvents.recipes(event => {
 ```
 #### [更多kjs使用说明点我](./docs/KubeJS使用说明.md)
 
-### 修改脚本后在游戏中执行（当前版本有bug无法热重载）：
+### <mark>修改脚本后在游戏中执行</mark>（当前版本有bug无法热重载）：
 
 ```指令
 /reload
