@@ -55,7 +55,7 @@
 
 在 `kubejs/server_scripts/` 下创建脚本：
 
-```js
+```kjs
 ServerEvents.recipes(event => {
     // 需要末影级压机
     event.recipes.create.pressing(
@@ -80,8 +80,24 @@ ServerEvents.recipes(event => {
         .tier(Tier.CREATIVE)
 })
 ```
+以及装配线
+```kjs
+………
+    // 序列装配：整条装配线需要超越级
+    let transitional = 'kubejs:incomplete_test_package'  //装配线名字
+    event.recipes.create.sequenced_assembly(
+        'minecraft:copper_block',  //产物
+        'minecraft:copper_ingot',  //反应物
+        [
+            event.recipes.create.pressing(transitional, transitional),   //第一道工序，辊压
+            event.recipes.create.filling(transitional, [transitional, Fluid.of('minecraft:water', 250)]),  //第二道工序，注液
+            event.recipes.create.deploying(transitional, [transitional, 'minecraft:quartz'])  //第三道工序，机械手装配
+        ]
+    ).transitionalItem(transitional).loops(2).tier(Tier.BEYOND)
+}
+```
 
-修改脚本后在游戏中执行（当前版本有bug无法热重载）：
+### 修改脚本后在游戏中执行（当前版本有bug无法热重载）：
 
 ```指令
 /reload
@@ -112,7 +128,7 @@ ServerEvents.recipes(event => {
 
 不需要重写原配方，也可以直接绑定门槛：
 
-```js
+```kjs
 // 精确设置
 MoreFormula.setTier(
     'create:sequenced_assembly/precision_mechanism',   //配方id
@@ -129,7 +145,7 @@ MoreFormula.removeTier('create:mixing/brass_ingot')
 
 也可以使用事件方式批量管理：
 
-```js
+```kjs
 MoreFormulaEvents.registerTier(event => {
     event.setTier('create:mixing/*', Tier.BRASS)
     event.setTier(
