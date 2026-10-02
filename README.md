@@ -4,9 +4,13 @@
 
 配方可以要求黄铜、下界合金、末影、超越或创造级机器才能处理。所有门槛都通过 KubeJS 配置，并兼容 KubeJS-Create 的 Create 配方脚本 API。
 
+本mod由ai辅助开发
+
+目前版本有个bug，体现为无法热重载/reload，必须大退游戏后才可加载新配方
+
 ## 依赖
 
-以下依赖全部必需：
+以下依赖**全部**必需：
 
 | 依赖 | 版本要求 |
 |------|----------|
@@ -20,9 +24,9 @@
 ## 功能
 
 - 为 Create 配方设置机器等级门槛。
-- 支持压机、混合、压实、浇注、部署、物品施用和序列装配。
+- 支持辊压、搅拌、注液器、机械手、和序列装配。
 - 为 JEI 注册按等级区分的配方分类标签。
-- JEI 中显示对应等级的 CMM 高级机器动画和催化剂。
+- JEI 中显示对应等级的 CMM **高级机器动画**和催化剂。
 - 支持创造级专属配方。
 - 支持按配方 ID 精确设置门槛和按前缀批量设置门槛。
 - 不使用 TOML 配置文件。
@@ -51,14 +55,14 @@
 
 在 `kubejs/server_scripts/` 下创建脚本：
 
-```js
+```kjs
 ServerEvents.recipes(event => {
     // 需要末影级压机
     event.recipes.create.pressing(
-        'minecraft:iron_block',
-        'minecraft:iron_ingot'
-    ).id('example:end_pressing')
-        .tier(Tier.END)
+        'minecraft:iron_block',   //产物
+        'minecraft:iron_ingot'    //反应物
+    ).id('example:end_pressing')  //配方id
+        .tier(Tier.END)           //机器等级
 
     // 需要下界合金级，并且必须加热
     event.recipes.create.mixing(
@@ -76,10 +80,27 @@ ServerEvents.recipes(event => {
         .tier(Tier.CREATIVE)
 })
 ```
+以及装配线
+```kjs
+………
+    // 序列装配：整条装配线需要超越级
+    let transitional = 'kubejs:incomplete_test_package'  //装配线名字
+    event.recipes.create.sequenced_assembly(
+        'minecraft:copper_block',  //产物
+        'minecraft:copper_ingot',  //反应物
+        [
+            event.recipes.create.pressing(transitional, transitional),   //第一道工序，辊压
+            event.recipes.create.filling(transitional, [transitional, Fluid.of('minecraft:water', 250)]),  //第二道工序，注液
+            event.recipes.create.deploying(transitional, [transitional, 'minecraft:quartz'])  //第三道工序，机械手装配
+        ]
+    ).transitionalItem(transitional).loops(2).tier(Tier.BEYOND)
+}
+```
+#### [更多kjs使用说明点我](./docs/KubeJS使用说明.md)
 
-修改脚本后在游戏中执行：
+### ~~修改脚本后在游戏中执行~~（当前版本有bug无法热重载）：
 
-```text
+```指令
 /reload
 ```
 
@@ -87,13 +108,13 @@ ServerEvents.recipes(event => {
 
 可以设置门槛的类型：
 
-- `create:pressing`：高级压机
-- `create:mixing`：高级搅拌器和高级盆
-- `create:compacting`：高级压机和高级盆
-- `create:filling`：高级喷口
-- `create:deploying`：高级部署器
-- `create:item_application`：高级部署器
-- `create:sequenced_assembly`：压机、喷口和部署器组成的序列装配线
+- `create:pressing`：动力辊压机
+- `create:mixing`：动力搅拌器和工作盆
+- `create:compacting`：动力辊压机和工作盆
+- `create:filling`：注液器
+- `create:deploying`：机械手
+- `create:item_application`：拿物品的机械手
+- `create:sequenced_assembly`：序列装配
 
 以下类型没有对应的 CMM 高级机器，因此不建议设置门槛：
 
@@ -108,11 +129,11 @@ ServerEvents.recipes(event => {
 
 不需要重写原配方，也可以直接绑定门槛：
 
-```js
+```kjs
 // 精确设置
 MoreFormula.setTier(
-    'create:sequenced_assembly/precision_mechanism',
-    Tier.END
+    'create:sequenced_assembly/precision_mechanism',   //配方id
+    Tier.END                                           //设置等级
 )
 
 // 为指定前缀的配方设置门槛
@@ -125,7 +146,7 @@ MoreFormula.removeTier('create:mixing/brass_ingot')
 
 也可以使用事件方式批量管理：
 
-```js
+```kjs
 MoreFormulaEvents.registerTier(event => {
     event.setTier('create:mixing/*', Tier.BRASS)
     event.setTier(
