@@ -8,7 +8,6 @@
     "CMMMechanicalPressBlockEntityMixin",
     "CMMSpoutBlockEntityMixin",
     "MechanicalPressBlockEntityMixin",
-    "SawBlockEntityMixin",
     "SpoutBlockEntityMixin"
   ],
   "client": [

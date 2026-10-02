@@ -10,6 +10,7 @@ import dev.engine_room.flywheel.lib.model.baked.PartialModel;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.recipe.IRecipeManager;
+import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -21,11 +22,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
 import net.yxiao233.createmoremachines.api.registry.BuiltInAdvancedMachineTypes;
 import org.jetbrains.annotations.NotNull;
 import org.minecart.more_formula.Config;
@@ -34,14 +34,17 @@ import org.minecart.more_formula.compat.jei.category.TieredDeployingCategory;
 import org.minecart.more_formula.compat.jei.category.TieredMixingCategory;
 import org.minecart.more_formula.compat.jei.category.TieredPackingCategory;
 import org.minecart.more_formula.compat.jei.category.TieredPressingCategory;
-import org.minecart.more_formula.compat.jei.category.TieredSawingCategory;
 import org.minecart.more_formula.compat.jei.category.TieredSequencedAssemblyCategory;
 import org.minecart.more_formula.compat.jei.category.TieredSpoutCategory;
 import org.minecart.more_formula.compat.jei.category.sequenced.TieredMachineContext;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 @JeiPlugin
@@ -57,7 +60,26 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
                         BuiltInAdvancedMachineTypes.AdvancedMachineType<?>[] catalystTypes, CatFactory factory) {
     }
 
+    /**
+     * 门槛的取值范围是封闭的（1..4 四级 + -1 创造级），因此分级分类的“全集”也是封闭的。
+     *
+     * <p>按全集建分类、而不是只按「当前已知等级」建，原因：
+     * {@code registerCategories} 的调用时机由 JEI 决定（进入世界、以及客户端资源重载），
+     * 而等级是 KubeJS 脚本执行时才写进 {@link Config} 的 —— 两者的先后顺序并不受本模组控制。
+     * 只要出现「JEI 建分类时某等级还没被脚本注册」的情况，那个等级就永远没有分类。
+     * 建全集后这个时序问题就不存在了：分类始终都在，运行时再按当前门槛表隐藏/取消隐藏
+     * （见 {@link #onRuntimeAvailable}），并把晚到的等级所需配方补交上去。
+     */
+    private static final int[] ALL_TIERS = {Config.CREATIVE_TIER, 1, 2, 3, 4};
+
     private final List<CreateRecipeCategory<?>> tieredCategories = new ArrayList<>();
+    /**
+     * tier → (配方类型 categoryPath → 该等级该类型的分类)。
+     * 用 categoryPath 作二级键，运行时的隐藏/补配方都能精确定位，不需要做字符串猜测。
+     */
+    private final Map<Integer, Map<String, CreateRecipeCategory<?>>> categoriesByTier = new LinkedHashMap<>();
+    /** 在 registerRecipes 阶段真正提交过配方的等级（避免运行时重复 addRecipes 造成重复条目）。 */
+    private final Set<Integer> tiersRegisteredWithRecipes = new LinkedHashSet<>();
     private List<Kind> kinds;
 
     @Override
@@ -77,9 +99,6 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
                     new Kind(AllRecipeTypes.COMPACTING, "packing", 177, 103,
                             machines(BuiltInAdvancedMachineTypes.PRESS, BuiltInAdvancedMachineTypes.BASIN),
                             (info, machine, basin, tierName) -> new TieredPackingCategory(castInfo(info), state(machine), basinState(basin))),
-                    new Kind(AllRecipeTypes.CUTTING, "sawing", 177, 70,
-                            machines(BuiltInAdvancedMachineTypes.SAW),
-                            (info, machine, basin, tierName) -> new TieredSawingCategory(castInfo(info), state(machine))),
                     new Kind(AllRecipeTypes.FILLING, "spout_filling", 177, 70,
                             machines(BuiltInAdvancedMachineTypes.SPOUT),
                             (info, machine, basin, tierName) -> new TieredSpoutCategory(castInfo(info), state(machine), spoutPartials(tierName), depotState(tierName))),
@@ -100,7 +119,24 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
     @Override
     public void registerCategories(@NotNull IRecipeCategoryRegistration registration) {
         tieredCategories.clear();
-        for (int tier : Config.getKnownTiers()) {
+        categoriesByTier.clear();
+        tiersRegisteredWithRecipes.clear();
+
+        Set<Integer> known = new LinkedHashSet<>(Config.getKnownTiers());
+        if (known.isEmpty()) {
+            // 这个整合包没配任何门槛 —— 不往 JEI 里塞一堆空分类。
+            return;
+        }
+
+        // 建「全集」，这样脚本稍后新增的等级也有现成分类可用。
+        Set<Integer> tiers = new LinkedHashSet<>(ALL_TIERS.length + known.size());
+        for (int tier : ALL_TIERS) {
+            tiers.add(tier);
+        }
+        tiers.addAll(known);
+
+        for (int tier : tiers) {
+            Map<String, CreateRecipeCategory<?>> perTier = new LinkedHashMap<>();
             for (Kind kind : kinds()) {
                 BlockEntry<? extends Block> machine = machine(kind.type(), tier);
                 if (machine == null) {
@@ -108,8 +144,12 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
                 }
                 CreateRecipeCategory<?> category = build(kind, tier, machine, basin(tier));
                 if (category != null) {
+                    perTier.put(kind.categoryPath(), category);
                     tieredCategories.add(category);
                 }
+            }
+            if (!perTier.isEmpty()) {
+                categoriesByTier.put(tier, perTier);
             }
         }
         registration.addRecipeCategories(tieredCategories.toArray(new IRecipeCategory[0]));
@@ -126,7 +166,7 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
 
         Item iconItem = machine.get().asItem();
         CreateRecipeCategory.Info info = new CreateRecipeCategory.Info(
-                mezz.jei.api.recipe.RecipeType.createRecipeHolderType(uid),
+                RecipeType.createRecipeHolderType(uid),
                 title,
                 new com.simibubi.create.compat.jei.EmptyBackground(kind.bgWidth(), kind.bgHeight()),
                 new com.simibubi.create.compat.jei.ItemIcon(() -> new ItemStack(iconItem)),
@@ -138,7 +178,16 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(@NotNull IRecipeRegistration registration) {
-        tieredCategories.forEach(category -> category.registerRecipes(registration));
+        for (CreateRecipeCategory<?> category : tieredCategories) {
+            category.registerRecipes(registration);
+        }
+        // 建分类时就已经有配方的等级，运行时不重复提交。
+        List<Integer> known = Config.getKnownTiers();
+        for (int tier : categoriesByTier.keySet()) {
+            if (known.contains(tier)) {
+                tiersRegisteredWithRecipes.add(tier);
+            }
+        }
     }
 
     @Override
@@ -146,28 +195,84 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
         tieredCategories.forEach(category -> category.registerCatalysts(registration));
     }
 
+    /**
+     * 每次 JEI 就绪都会调用这里，因此它是「让显示跟上当前门槛表」的时机。
+     *
+     * <p>做三件事：
+     * <ol>
+     *   <li>把原版 Create 分类里已被设门槛的配方隐藏掉（避免同一个配方在两处出现）；</li>
+     *   <li>按当前门槛表隐藏/取消隐藏分级分类 —— 分类是按全集建的，因此某个等级
+     *       「在 JEI 建分类之后才被脚本注册」也能在这里被点亮；</li>
+     *   <li>为这类晚到的等级补交配方（JEI 没有清空配方的 API，
+     *       所以只对尚未提交过的等级补齐，绝不重复提交）。</li>
+     * </ol>
+     *
+     * <p>已知限制：本模组不做 JEI 配方的增量同步。若某等级的配方是在
+     * {@code registerRecipes} 之后才被改动（例如 {@code /reload} 改了同一个已注册等级的配方），
+     * 这里只负责「补新等级」，不会替换已提交的配方列表；JEI 自身在其启动流程中重建配方。
+     */
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime runtime) {
         Level level = Minecraft.getInstance().level;
-        if (level == null) {
+        if (level == null || tieredCategories.isEmpty()) {
             return;
         }
         IRecipeManager recipeManager = runtime.getRecipeManager();
+        List<Integer> known = Config.getKnownTiers();
+
+        // 1) 原版分类里被分级的配方 → 隐藏
         for (Kind kind : kinds()) {
             Collection<?> gated = gatedAboveTier(level, kind.type());
             if (gated.isEmpty()) {
                 continue;
             }
-            mezz.jei.api.recipe.RecipeType<?> vanillaCategory = mezz.jei.api.recipe.RecipeType.createRecipeHolderType(
+            RecipeType<?> vanillaCategory = RecipeType.createRecipeHolderType(
                     ResourceLocation.fromNamespaceAndPath("create", kind.categoryPath()));
             if (!categoryExists(runtime, vanillaCategory)) {
                 continue;
             }
             hideAll(recipeManager, vanillaCategory, gated);
         }
+
+        // 2) 分级分类按当前门槛表隐藏 / 取消隐藏
+        for (Map.Entry<Integer, Map<String, CreateRecipeCategory<?>>> entry : categoriesByTier.entrySet()) {
+            boolean inUse = known.contains(entry.getKey());
+            for (CreateRecipeCategory<?> category : entry.getValue().values()) {
+                RecipeType<?> type = category.getRecipeType();
+                if (inUse) {
+                    recipeManager.unhideRecipeCategory(type);
+                } else {
+                    recipeManager.hideRecipeCategory(type);
+                }
+            }
+        }
+
+        // 3) 启动时还没有、之后才出现的等级 → 补交配方
+        for (Map.Entry<Integer, Map<String, CreateRecipeCategory<?>>> entry : categoriesByTier.entrySet()) {
+            int tier = entry.getKey();
+            if (!known.contains(tier) || tiersRegisteredWithRecipes.contains(tier)) {
+                continue;
+            }
+            for (Kind kind : kinds()) {
+                CreateRecipeCategory<?> category = entry.getValue().get(kind.categoryPath());
+                if (category == null) {
+                    continue;
+                }
+                List<RecipeHolder<?>> holders = gatedHolders(kind.type(), tier);
+                if (!holders.isEmpty()) {
+                    addHolders(recipeManager, category.getRecipeType(), holders);
+                }
+            }
+        }
+        tiersRegisteredWithRecipes.addAll(known);
     }
 
-    private static boolean categoryExists(IJeiRuntime runtime, mezz.jei.api.recipe.RecipeType<?> jeiType) {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void addHolders(IRecipeManager manager, RecipeType type, List<RecipeHolder<?>> holders) {
+        manager.addRecipes(type, holders);
+    }
+
+    private static boolean categoryExists(IJeiRuntime runtime, RecipeType<?> jeiType) {
         return runtime.getRecipeManager()
                 .createRecipeCategoryLookup()
                 .limitTypes(List.of(jeiType))
@@ -179,7 +284,9 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static Collection<?> gatedAboveTier(Level level, AllRecipeTypes type) {
-        RecipeType vanillaType = type.getType();
+        // 注意这里的 RecipeType 是 Minecraft 的（mezz.jei.api.recipe.RecipeType 在文件上是同名 import），
+        // 所以用全限定名区分。
+        net.minecraft.world.item.crafting.RecipeType vanillaType = type.getType();
         List holders = level.getRecipeManager().getAllRecipesFor(vanillaType);
         return ((List<RecipeHolder<?>>) holders).stream()
                 .filter(holder -> Config.getRequiredTier(holder.id()) != 0)
@@ -192,7 +299,7 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
         if (level == null) {
             return List.of();
         }
-        RecipeType vanillaType = type.getType();
+        net.minecraft.world.item.crafting.RecipeType vanillaType = type.getType();
         List holders = level.getRecipeManager().getAllRecipesFor(vanillaType);
         return ((List<RecipeHolder<?>>) holders).stream()
                 .filter(holder -> Config.getRequiredTier(holder.id()) == tier)
@@ -200,7 +307,7 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void hideAll(IRecipeManager manager, mezz.jei.api.recipe.RecipeType jeiType, Collection recipes) {
+    private static void hideAll(IRecipeManager manager, RecipeType jeiType, Collection recipes) {
         manager.hideRecipes(jeiType, recipes);
     }
 
@@ -247,7 +354,6 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
     private static TieredMachineContext sequencedContext(String tierName) {
         return new TieredMachineContext(
                 safeState(entry(BuiltInAdvancedMachineTypes.PRESS, tierName), AllBlocks.MECHANICAL_PRESS.getDefaultState()),
-                safeState(entry(BuiltInAdvancedMachineTypes.SAW, tierName), AllBlocks.MECHANICAL_SAW.getDefaultState()),
                 safeState(entry(BuiltInAdvancedMachineTypes.SPOUT, tierName), AllBlocks.SPOUT.getDefaultState()),
                 spoutPartials(tierName),
                 safeState(entry(BuiltInAdvancedMachineTypes.DEPLOYER, tierName), AllBlocks.DEPLOYER.getDefaultState()),
@@ -264,9 +370,10 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
         BuiltInAdvancedMachineTypes.AdvancedMachineType<?> advancedType = switch (type) {
             case PRESSING, COMPACTING, SEQUENCED_ASSEMBLY -> BuiltInAdvancedMachineTypes.PRESS;
             case MIXING -> BuiltInAdvancedMachineTypes.MIXER;
-            case CUTTING -> BuiltInAdvancedMachineTypes.SAW;
             case FILLING -> BuiltInAdvancedMachineTypes.SPOUT;
             case DEPLOYING, ITEM_APPLICATION -> BuiltInAdvancedMachineTypes.DEPLOYER;
+            // CUTTING（锯切）没有高级机器：CMM 对 SAW 调用了 withoutAll()，
+            // 一个分级锯都不注册，因此不建锯的分级分类。
             default -> null;
         };
         if (advancedType == null) {
@@ -300,7 +407,7 @@ public class MoreFormulaJeiPlugin implements IModPlugin {
 
     private static List<Supplier<? extends ItemStack>> unlockedCatalysts(BuiltInAdvancedMachineTypes.AdvancedMachineType<?>[] machineTypes, int requiredTier) {
         List<Supplier<? extends ItemStack>> list = new ArrayList<>();
-        if (requiredTier == -1) {
+        if (requiredTier == Config.CREATIVE_TIER) {
             addMachinesOfTier(machineTypes, "creative", list);
             return list;
         }

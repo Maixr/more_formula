@@ -13,6 +13,7 @@ run/
 .classpath
 .project
 .settings/
+.vscode/
 
 # Local dependency/cache artifacts
 temp_kubejs_create.zip
@@ -26,3 +27,6 @@ vless-test.yaml
 Thumbs.db
 *.swp
 *.swo
+
+# Node modules (build tooling in tools/ has no deps, but be safe)
+node_modules/

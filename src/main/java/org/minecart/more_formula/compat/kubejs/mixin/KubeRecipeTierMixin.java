@@ -24,7 +24,7 @@ public abstract class KubeRecipeTierMixin {
     public KubeRecipe tier(int tier) {
         this.more_formula$tier = tier;
         if (tier != 0 && this.id != null) {
-            Config.addTier(this.id, tier);
+            Config.addTier(this.id, tier, Config.Source.SERVER);
         }
         return (KubeRecipe) (Object) this;
     }
@@ -37,7 +37,7 @@ public abstract class KubeRecipeTierMixin {
     @Inject(method = "save()V", at = @At("TAIL"))
     private void more_formula$registerTierOnSave(CallbackInfo ci) {
         if (this.more_formula$tier != 0 && this.id != null) {
-            Config.addTier(this.id, this.more_formula$tier);
+            Config.addTier(this.id, this.more_formula$tier, Config.Source.SERVER);
         }
     }
 
@@ -46,7 +46,7 @@ public abstract class KubeRecipeTierMixin {
         if (this.more_formula$tier != 0) {
             net.minecraft.resources.ResourceLocation finalId = cir.getReturnValue();
             if (finalId != null) {
-                Config.addTier(finalId, this.more_formula$tier);
+                Config.addTier(finalId, this.more_formula$tier, Config.Source.SERVER);
             }
         }
     }

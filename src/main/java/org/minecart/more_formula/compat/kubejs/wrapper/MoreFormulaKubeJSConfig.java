@@ -8,16 +8,18 @@ import java.util.Map;
 
 public class MoreFormulaKubeJSConfig {
 
+    // 这三个入口从服务器脚本（server_scripts）调用，因此登记为 SERVER 来源：
+    // 每次 /reload 前会被清空后由脚本重新写入，不会跨重载累积。
     public static void setTier(String recipeId, int tier) {
         if (recipeId.endsWith("*")) {
-            Config.addPrefixTier(recipeId, tier);
+            Config.addPrefixTier(recipeId, tier, Config.Source.SERVER);
         } else {
-            Config.addTier(ResourceLocation.parse(recipeId), tier);
+            Config.addTier(ResourceLocation.parse(recipeId), tier, Config.Source.SERVER);
         }
     }
 
     public static void setPrefixTier(String prefix, int tier) {
-        Config.addPrefixTier(prefix, tier);
+        Config.addPrefixTier(prefix, tier, Config.Source.SERVER);
     }
 
     public static void removeTier(String recipeId) {
