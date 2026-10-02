@@ -1,5 +1,14 @@
 # More Formula KubeJS 使用说明书
 
+> ⚠️ **本文已被取代**：[`more_formula-KubeJS编写指南.md`](./more_formula-KubeJS编写指南.md) 是新的权威文档，
+> 内容更全、且修掉了本文的几处过时/不准确说法。**请优先阅读新指南。**
+>
+> 本文保留仅为兼容旧链接。已知过时之处：
+> - 「JEI 显示会更新吗？会」—— 实际行为更微妙，见新指南第 10 节
+> - `Tier.CREATIVE` 的说明不完整，见新指南第 8 节
+> - 缺少「整条装配线共用一个门槛」这条关键规则，见新指南第 7 节
+> - 缺少「启动脚本 vs 服务器脚本」的桶与 `/reload` 语义，见新指南第 9 节
+
 > 适用于 more_formula 0.0.1+
 >
 > 前置：Create 6.x、Create: More Machines 2.7、KubeJS 2101.7.2+、KubeJS-Create 2101.3.1+（均为必需依赖）

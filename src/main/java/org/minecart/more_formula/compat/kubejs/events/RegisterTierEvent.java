@@ -49,11 +49,13 @@ public class RegisterTierEvent implements KubeEvent {
 
     @Override
     public void afterPosted(EventResult result) {
+        // 这个事件由 STARTUP 脚本触发，且只在游戏加载完成时投递一次；
+        // 即便有人从服务器脚本里调它，写进 STARTUP 桶也不会被 /reload 清掉。
         for (var entry : exactTiers.entrySet()) {
-            Config.addTier(entry.getKey(), entry.getValue());
+            Config.addTier(entry.getKey(), entry.getValue(), Config.Source.STARTUP);
         }
         for (var entry : prefixTiers.entrySet()) {
-            Config.addPrefixTier(entry.getKey(), entry.getValue());
+            Config.addPrefixTier(entry.getKey(), entry.getValue(), Config.Source.STARTUP);
         }
     }
 }

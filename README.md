@@ -6,7 +6,35 @@
 
 本mod由ai辅助开发
 
-目前版本有个bug，体现为无法热重载/reload，必须大退游戏后才可加载新配方
+## 0.0.2 修复说明
+
+0.0.1 存在下列问题，0.0.2 已全部修复：
+
+1. **`/reload` 后门槛表无限膨胀（原「必须大退游戏」的根因）**
+   门槛表此前没有任何清理逻辑，而 `/reload` 会重跑服务器脚本、再次写入门槛，
+   前缀条目还会重复追加，越积越多。现在按来源分桶：
+   服务器脚本写的条目在每次重载前清空、启动脚本写的条目保留，
+   同一个前缀重复注册也变成幂等替换。
+2. **用前缀门槛配的配方在 JEI 里彻底消失**
+   隐藏逻辑用的是 `getRequiredTier()`（能解析前缀），而建分级分类用的是
+   `getKnownTiers()`（当时只统计精确条目）。于是前缀门槛命中的配方
+   既被从原版 Create 分类里隐藏掉、又没有对应的分级分类可去 —— 在 JEI 里完全看不到。
+   现在 `getKnownTiers()` 精确 + 前缀都计入。
+3. **JEI 分级分类的构建时机依赖脚本执行顺序**
+   分类改为按等级全集构建，运行时再按当前门槛表隐藏/取消隐藏并补交配方，
+   不再受「JEI 建分类时脚本是否已经跑过」的影响。
+4. **移除了锯（sawing/cutting）相关的死代码**
+   CMM 2.7 通过 `withoutAll()` 关掉了 SAW，一个分级锯方块都没有注册，
+   原代码却仍注册了锯的 Mixin 闸门、分级 JEI 分类和分级锯动画（永不生效）。
+   现在锯切若出现在序列装配里，直接使用 Create 原版的锯动画。
+5. **浇注配方的门槛判定不再受配方顺序影响**
+   原实现「取第一条匹配到的浇注配方」的门槛，而 Create 实际执行的是
+   `RecipeManager` 返回顺序里的第一条，两者可能不是同一条 → 可能漏放。
+   现在对所有候选取最严门槛。
+6. **合并了重复的门槛存储**
+   原来精确门槛同时写进「内建」和「KubeJS」两张表（内容永远相同），
+   前缀也一样，优先级分层形同虚设。现改为按来源分桶的单一结构，
+   优先级规则明确：精确 > 前缀，同类型下服务器脚本 > 启动脚本，前缀取最长匹配。
 
 ## 依赖
 
@@ -98,7 +126,7 @@ ServerEvents.recipes(event => {
 ```
 #### [更多kjs使用说明点我](./docs/KubeJS使用说明.md)
 
-### ~~修改脚本后在游戏中执行~~（当前版本有bug无法热重载）：
+### 修改脚本后在游戏中执行：
 
 ```指令
 /reload
@@ -158,7 +186,7 @@ MoreFormulaEvents.registerTier(event => {
 
 ## 构建
 
-项目使用 Gradle，Java 版本要求为 21：
+标准方式（需要能访问 `maven.neoforged.net` 等仓库），Java 21：
 
 ```bash
 ./gradlew build
@@ -170,13 +198,15 @@ Windows：
 gradlew.bat build
 ```
 
-构建产物位于：
+构建产物位于 `build/libs/more_formula-版本号.jar`。
 
-```text
-build/libs/more_formula-版本号.jar
-```
+> ⚠️ **本开发机无法用 Gradle 构建**：`maven.neoforged.net`、`maven.latvian.dev`、
+> `plugins.gradle.org` 在本机均不可达。本机请改用手工流程 —— 直接运行
+> `build_run.cmd`，详见 [BUILD.md](BUILD.md)。
 
 ## 文档与许可证
 
-- KubeJS 详细说明：[docs/KubeJS使用说明.md](docs/KubeJS使用说明.md)
+- **KubeJS 编写指南（权威，推荐先读）**：[docs/more_formula-KubeJS编写指南.md](docs/more_formula-KubeJS编写指南.md)
+- KubeJS 简版说明（旧）：[docs/KubeJS使用说明.md](docs/KubeJS使用说明.md)
+- 本机构建说明：[BUILD.md](BUILD.md)
 - 许可证：MIT，见 [LICENSE](LICENSE)
