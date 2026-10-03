@@ -105,6 +105,8 @@ build_run.cmd
 |---|---|
 | Create 6.0.10 | `libs/create-1.21.1-6.0.10.jar` |
 | Create: More Machines 2.7 | `libs/createmoremachines-1.21.1-2.7.jar` |
+| Mekanical-Create 0.2.8 (optional compat compile/runtime) | `libs/mekanicalcreate-0.2.8-mc1.21.1-neoforge.jar` |
+| Mekanism 10.7.19.85（Mekanical-Create 的必需依赖，仅运行时） | `libs/mekanism-1.21.1-10.7.19.85.jar` |
 | KubeJS-Create | `libs/kubejs-create-neoforge-2101.3.1-build.18.jar` |
 | KubeJS 本体 | `libs/kubejs-neoforge-2101.7.2-build.377.jar` |
 | rhino（KubeJS 依赖） | `libs/rhino-2101.2.8-build.91.jar` |

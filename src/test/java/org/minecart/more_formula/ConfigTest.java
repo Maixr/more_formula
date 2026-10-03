@@ -8,6 +8,8 @@ package org.minecart.more_formula;
 // 双 map 合并后的优先级（D）。
 
 import net.minecraft.resources.ResourceLocation;
+import org.minecart.more_formula.compat.mekanicalcreate.MekanicalCreateRecipeGate;
+import org.minecart.more_formula.compat.mekanicalcreate.MekanicalCreateSpeedConfig;
 
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -117,6 +119,92 @@ public final class ConfigTest {
         Config.addPrefixTier(null, 2, SERVER);
         check("空前缀被忽略", () -> Config.getKnownTiers().isEmpty());
         check("null 配方 id 安全", () -> Config.getRequiredTier(null) == 0);
+
+        // ---- Mekanical-Create：CMM 模块等级与派生配方 ID ----
+        check("普通 Create 模块为 0 级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("create:mechanical_press")) == 0);
+        check("CMM brass 模块为 1 级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("createmoremachines:brass_mechanical_press")) == 1);
+        check("CMM netherite 模块为 2 级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("createmoremachines:netherite_mechanical_press")) == 2);
+        check("CMM end 模块为 3 级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("createmoremachines:end_mechanical_press")) == 3);
+        check("CMM beyond 模块为 4 级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("createmoremachines:beyond_mechanical_press")) == 4);
+        check("CMM creative 模块为创造级", () -> MekanicalCreateRecipeGate.getModuleTier(
+                rl("createmoremachines:creative_mechanical_press")) == Config.CREATIVE_TIER);
+        check("识别 CMM 压机类别", () -> MekanicalCreateRecipeGate.getModuleKind(
+                rl("createmoremachines:netherite_mechanical_press"))
+                == MekanicalCreateRecipeGate.ModuleKind.PRESS);
+        check("识别 CMM 部署器类别", () -> MekanicalCreateRecipeGate.getModuleKind(
+                rl("createmoremachines:beyond_deployer"))
+                == MekanicalCreateRecipeGate.ModuleKind.DEPLOYER);
+        check("识别 CMM 搅拌器类别", () -> MekanicalCreateRecipeGate.getModuleKind(
+                rl("createmoremachines:brass_mechanical_mixer"))
+                == MekanicalCreateRecipeGate.ModuleKind.MIXER);
+        check("识别 CMM 喷口类别", () -> MekanicalCreateRecipeGate.getModuleKind(
+                rl("createmoremachines:end_spout"))
+                == MekanicalCreateRecipeGate.ModuleKind.SPOUT);
+        check("非机器 CMM 物品不被接受", () -> MekanicalCreateRecipeGate.getModuleKind(
+                rl("createmoremachines:netherite_casing"))
+                == MekanicalCreateRecipeGate.ModuleKind.NONE);
+        check("普通槽接受 CMM 压机", () -> MekanicalCreateRecipeGate.isSupportedModule(
+                rl("createmoremachines:netherite_mechanical_press"), false));
+        check("普通槽接受 CMM 部署器", () -> MekanicalCreateRecipeGate.isSupportedModule(
+                rl("createmoremachines:brass_deployer"), false));
+        check("非流体槽拒绝 CMM 搅拌器", () -> !MekanicalCreateRecipeGate.isSupportedModule(
+                rl("createmoremachines:brass_mechanical_mixer"), false));
+        check("流体槽接受 CMM 搅拌器", () -> MekanicalCreateRecipeGate.isSupportedModule(
+                rl("createmoremachines:brass_mechanical_mixer"), true));
+        check("非流体槽拒绝 CMM 喷口", () -> !MekanicalCreateRecipeGate.isSupportedModule(
+                rl("createmoremachines:netherite_spout"), false));
+        check("CMM 压机匹配 Create 压机配方分支", () -> MekanicalCreateRecipeGate.matchesCreateModule(
+                rl("createmoremachines:netherite_mechanical_press"), rl("create:mechanical_press"), true));
+        check("CMM 搅拌器在流体开关关闭时不映射", () -> !MekanicalCreateRecipeGate.matchesCreateModule(
+                rl("createmoremachines:brass_mechanical_mixer"), rl("create:mechanical_mixer"), false));
+        check("CMM 模块不冒充其他 Create 机器", () -> !MekanicalCreateRecipeGate.matchesCreateModule(
+                rl("createmoremachines:netherite_mechanical_press"), rl("create:deployer"), true));
+        check("CMM 压机匹配 pressing 序列步骤", () -> MekanicalCreateRecipeGate.matchesSequenceModule(
+                rl("createmoremachines:netherite_mechanical_press"), rl("create:mechanical_press")));
+        check("CMM 喷口匹配 filling 序列步骤", () -> MekanicalCreateRecipeGate.matchesSequenceModule(
+                rl("createmoremachines:end_spout"), rl("create:spout")));
+        check("Mekanical-Create 派生 ID还原原配方", () -> MekanicalCreateRecipeGate.sourceRecipeId(
+                rl("create:pressing/iron/mekanicalcreate_pressing")).equals(
+                rl("create:pressing/iron")));
+        check("普通模块不能执行 NETHERITE 配方", () -> !MekanicalCreateRecipeGate.isAllowed(
+                0, 2));
+        check("NETHERITE 模块可以执行 NETHERITE 配方", () -> MekanicalCreateRecipeGate.isAllowed(
+                2, 2));
+
+        // ---- Mekanical-Create：按机器类别和 CMM 等级读取倍率 ----
+        check("Brass 默认 1 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(1) == 1);
+        check("Netherite 默认 2 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(2) == 2);
+        check("End 默认 3 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(3) == 3);
+        check("Beyond 默认 4 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(4) == 4);
+        check("Creative 默认最高 4 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(-1) == 4);
+        check("未知 tier 默认 1 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(0) == 1);
+        check("按机器类别隔离配置项", () -> MekanicalCreateSpeedConfig.configuredTierCount(
+                MekanicalCreateRecipeGate.ModuleKind.PRESS) == 5
+                && MekanicalCreateSpeedConfig.configuredTierCount(
+                MekanicalCreateRecipeGate.ModuleKind.DEPLOYER) == 5
+                && MekanicalCreateSpeedConfig.configuredTierCount(
+                MekanicalCreateRecipeGate.ModuleKind.MIXER) == 5
+                && MekanicalCreateSpeedConfig.configuredTierCount(
+                MekanicalCreateRecipeGate.ModuleKind.SPOUT) == 5);
+        check("普通 Create 模块无加成", () -> MekanicalCreateSpeedConfig.getMultiplier(
+                rl("create:mechanical_press")) == 1);
+        check("并行数按倍率放大", () -> MekanicalCreateSpeedConfig.scaleParallelCount(9, 4) == 36);
+        check("work budget 按倍率放大", () -> MekanicalCreateSpeedConfig.scaleWorkBudget(40, 3) == 120);
+        check("倍率不低于 1", () -> MekanicalCreateSpeedConfig.clampMultiplier(0) == 1);
+        check("倍率上限为 64", () -> MekanicalCreateSpeedConfig.clampMultiplier(100) == 64);
+        check("work budget 溢出饱和", () -> MekanicalCreateSpeedConfig.scaleWorkBudget(
+                Long.MAX_VALUE, 2) == Long.MAX_VALUE);
+        check("press Netherite 默认 2 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(2) == 2);
+        check("deployer End 默认 3 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(3) == 3);
+        check("mixer Beyond 默认 4 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(4) == 4);
+        check("spout Creative 默认 4 倍", () -> MekanicalCreateSpeedConfig.defaultMultiplier(-1) == 4);
+        check("多个催化剂使用最高倍率而非相乘", () -> MekanicalCreateSpeedConfig.getHighestMultiplier(
+                List.of(2, 3, 1)) == 3);
 
         System.out.println();
         System.out.println("PASSED=" + passed + " FAILED=" + failed);

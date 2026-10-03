@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.minecart.more_formula.compat.mekanicalcreate.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "plugin": "org.minecart.more_formula.compat.mekanicalcreate.MoreFormulaMekanicalCreateMixinConfigPlugin",
+  "mixins": [
+    "SimulationRecipeResolverMixin",
+    "SimulationChamberBlockEntityMixin",
+    "MekanicalFactoryMultiblockDataMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

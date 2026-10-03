@@ -30,3 +30,9 @@ Thumbs.db
 
 # Node modules (build tooling in tools/ has no deps, but be safe)
 node_modules/
+
+# Agent session state
+.zcode/
+
+# Windows device-name leftovers from a failed shell redirection
+NUL

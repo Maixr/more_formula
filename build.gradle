@@ -166,6 +166,16 @@ dependencies {
     def createHandMadeJars = fileTree(dir: 'libs', include: ['create_hand_made-*.jar'])
     compileOnly createHandMadeJars
     runtimeOnly createHandMadeJars
+
+    // Mekanical-Create is optional. Put its jar in libs/ when compiling/testing the integration.
+    def mekanicalCreateJars = fileTree(dir: 'libs', include: ['mekanicalcreate-*.jar'])
+    compileOnly mekanicalCreateJars
+    runtimeOnly mekanicalCreateJars
+
+    // Mekanism APIs are only referenced by the optional Mekanical-Create mixins.
+    def mekanismJars = fileTree(dir: 'libs', include: ['mekanism-*.jar'])
+    compileOnly mekanismJars
+    runtimeOnly mekanismJars
 }
 
 // ConfigTest is a main()-style regression suite rather than a JUnit test,
@@ -197,7 +207,8 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
                              mod_version            : mod_version,
                              mod_authors            : mod_authors,
                              mod_description        : mod_description,
-                             create_hand_made_version: create_hand_made_version]
+                             create_hand_made_version: create_hand_made_version,
+                             mekanicalcreate_version : mekanicalcreate_version]
     inputs.properties replaceProperties
     expand replaceProperties
     from "src/main/templates"

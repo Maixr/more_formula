@@ -46,6 +46,10 @@ config = "${mod_id}-kubejs.mixins.json"
 [[mixins]]
 config = "${mod_id}-handmade.mixins.json"
 
+# Optional Mekanical-Create integration; its mixins are gated by mod presence.
+[[mixins]]
+config = "${mod_id}-mekanicalcreate.mixins.json"
+
 # The [[accessTransformers]] block allows you to declare where your AT file is.
 # If this block is omitted, a fallback attempt will be made to load an AT from META-INF/accesstransformer.cfg
 #[[accessTransformers]]
@@ -115,6 +119,13 @@ side = "BOTH"
 modId = "create_hand_made"
 type = "optional"
 versionRange = "[${create_hand_made_version},)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "mekanicalcreate"
+type = "optional"
+versionRange = "[${mekanicalcreate_version},)"
 ordering = "AFTER"
 side = "BOTH"
 
