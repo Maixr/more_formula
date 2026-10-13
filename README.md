@@ -273,6 +273,21 @@ gradlew.bat build
 
 构建产物位于 `build/libs/CreateMoreMachinesFormula-版本号.jar`。
 
+### 免 Gradle 构建（仓库不可达时）
+
+`tools/` 下有一套手工 javac 链：复用 Gradle 缓存里已解好的 MC+NeoForge 合并包，
+不经过 Gradle 解析。Windows 上直接跑：
+
+```bat
+build_run.cmd
+```
+
+它会依次执行 `tools/genargs.js`（生成 @argfile）→ `javac` → `tools/pack.js`（打包）。
+测试用 `node tools/run_tests.js`。
+
+注意 `tools/genargs.js` 里的 `-g` 不能去掉：Gradle 的 `JavaCompile` 默认带全套调试信息，
+而裸 javac 默认**不含局部变量表**；少了它，玩家提交的崩溃日志会丢局部变量名（jar 也小约 6%）。
+
 ## 文档与许可证
 
 - **KubeJS 编写指南（权威，推荐先读）**：[docs/more_formula-KubeJS编写指南.md](docs/more_formula-KubeJS编写指南.md)

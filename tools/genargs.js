@@ -263,6 +263,11 @@ fs.mkdirSync(out, { recursive: true });
 
 const args = [
   '-encoding', 'UTF-8',
+  // -g 必须显式给：Gradle 的 JavaCompile 默认带全套调试信息（-g = 源码/行号/局部变量），
+  // 而裸 javac 的默认是「源码 + 行号，不含局部变量表」。少了它，产物里没有
+  // LocalVariableTable，玩家提交的崩溃日志里局部变量名会丢、断点调试也对不上。
+  // 这是手工链与 Gradle 构建之间一个不显眼但真实的差异（jar 会小 ~6%）。
+  '-g',
   '-proc:none',
   '-Xmaxerrs', '2000',
   '-Xmaxwarns', '200',
