@@ -335,11 +335,211 @@ public final class ConfigTest {
                 "com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlockEntity",
                 "org.minecart.more_formula.compat.mekanicalcreate.mixin.SimulationRecipeResolverMixin"));
 
+        // ---- 新增：同输入多配方择优（复现 yunkuang.js 的 t1/t2 场景）----
+        selectionTests();
+
         System.out.println();
         System.out.println("PASSED=" + passed + " FAILED=" + failed);
         if (failed > 0) {
             System.exit(1);
         }
+    }
+
+    // =========================================================================
+    //  「同输入多配方择优」回归
+    // =========================================================================
+    //
+    //  用户报告的原 bug：yunkuang.js 里对同一输入 maixr:yunkuang_zazhi 写了
+    //  两条 create:crushing（t1 / t2），给下界粉碎轮喂料时出来的却是黄铜粉碎轮的
+    //  产物 —— 因为 Create 的 AllRecipeTypes.find 只回「注册顺序第一条」，
+    //  而旧实现只在这条上问「允许吗」，命中 t1 就放行 t1。
+    //
+    //  断言打在最底层的 pickBestIndexForTier(机器等级, id 列表) 上：它不碰任何
+    //  Minecraft 类型（Recipe 的静态初始化要求游戏注册表已 bootstrap，离线构造
+    //  RecipeHolder 会抛 "Not bootstrapped"），但选择的全部规则都在这一层。
+    // =========================================================================
+
+    private static List<ResourceLocation> ids(String... list) {
+        List<ResourceLocation> out = new java.util.ArrayList<>();
+        for (String s : list) {
+            out.add(rl(s));
+        }
+        return out;
+    }
+
+    /** 返回被选中的 id，未选中任何一条时返回 "<none>"。 */
+    private static String picked(int machineTier, List<ResourceLocation> list) {
+        int i = TierHelper.pickBestIndexForTier(machineTier, list);
+        return i < 0 ? "<none>" : list.get(i).toString();
+    }
+
+    /** 复现用户场景：同输入 t1(黄铜=1) 与 t2(下界=2)，t1 先注册。 */
+    private static void selectionTests() {
+        Config.clearAll();
+        Config.addTier(rl("maixr:yunkuang_zazhi_crushing_t1"), 1, SERVER);
+        Config.addTier(rl("maixr:yunkuang_zazhi_crushing_t2"), 2, SERVER);
+        List<ResourceLocation> both = ids(
+                "maixr:yunkuang_zazhi_crushing_t1",
+                "maixr:yunkuang_zazhi_crushing_t2");
+
+        // 核心断言：下界粉碎轮（2 级）必须执行 t2，而不是先注册的 t1。
+        check("同输入 t1/t2：下界级(2) 选 t2",
+                () -> picked(2, both).equals("maixr:yunkuang_zazhi_crushing_t2"));
+        check("同输入 t1/t2：末影级(3) 选 t2",
+                () -> picked(3, both).equals("maixr:yunkuang_zazhi_crushing_t2"));
+        check("同输入 t1/t2：超越级(4) 选 t2",
+                () -> picked(4, both).equals("maixr:yunkuang_zazhi_crushing_t2"));
+        // 黄铜级(1) 只够 t1，必须退到 t1（不能因为 t2 存在就整个拒绝）。
+        check("同输入 t1/t2：黄铜级(1) 退到 t1",
+                () -> picked(1, both).equals("maixr:yunkuang_zazhi_crushing_t1"));
+        // 原版机器(0) 两条都不够 → 空（闸门拦截）。
+        check("同输入 t1/t2：原版级(0) 两条都不够 → 空",
+                () -> picked(0, both).equals("<none>"));
+        // 创造级(-1) 通行一切，取最高的 t2。
+        check("同输入 t1/t2：创造级(-1) 选 t2",
+                () -> picked(-1, both).equals("maixr:yunkuang_zazhi_crushing_t2"));
+
+        // 三条同输入配方：3 级机器取 3 级那条（够得着的最高）。
+        Config.clearAll();
+        Config.addTier(rl("t:a1"), 1, SERVER);
+        Config.addTier(rl("t:a2"), 3, SERVER);
+        Config.addTier(rl("t:a3"), 4, SERVER);
+        List<ResourceLocation> three = ids("t:a1", "t:a2", "t:a3");
+        check("三档同输入：3 级机器取 t:a2（够得着的最高）",
+                () -> picked(3, three).equals("t:a2"));
+        check("三档同输入：4 级机器取 t:a3",
+                () -> picked(4, three).equals("t:a3"));
+        check("三档同输入：1 级机器取 t:a1",
+                () -> picked(1, three).equals("t:a1"));
+
+        // 并列（同门槛）时保留候选顺序里的第一条 —— 保证确定性。
+        Config.clearAll();
+        Config.addTier(rl("t:first"), 2, SERVER);
+        Config.addTier(rl("t:second"), 2, SERVER);
+        check("同门槛并列：取候选顺序第一条",
+                () -> picked(4, ids("t:first", "t:second")).equals("t:first"));
+
+        // 无门槛配方（0 级）不应压过设了门槛的同输入配方。
+        Config.clearAll();
+        Config.addTier(rl("t:gated"), 2, SERVER);
+        check("无门槛配方不压过带门槛配方",
+                () -> picked(2, ids("t:plain", "t:gated")).equals("t:gated"));
+        check("只有无门槛配方时被选中",
+                () -> picked(0, ids("t:plain")).equals("t:plain"));
+
+        // 创造级(-1) 是独占档：普通机器一条都不许选，即使它是最高级机器。
+        Config.clearAll();
+        Config.addTier(rl("t:creative"), -1, SERVER);
+        Config.addTier(rl("t:beyond"), 4, SERVER);
+        check("创造专用不落给超越级机器",
+                () -> picked(4, ids("t:creative", "t:beyond")).equals("t:beyond"));
+        check("创造级机器选创造专用那条（rank 高于常规）",
+                () -> picked(-1, ids("t:creative", "t:beyond")).equals("t:creative"));
+
+        // 边界：空候选 / 含 null 候选 → 不抛异常。
+        check("空候选 → <none>", () -> picked(4, ids()).equals("<none>"));
+        check("null 候选列表 → <none>",
+                () -> TierHelper.pickBestIndexForTier(4, null) == -1);
+        // 归一语义（见 TierHelper#rankIndicesForTier 注释）：null id = 查不到门槛，
+        // 按「无门槛」处理并保留 —— 因为列表型机器（锯/工作盆）绝不能丢掉一条
+        // 只是反查失败的配方。于是它排在带门槛的候选之后、与原顺序内部稳定。
+        check("候选含 null 项时按无门槛保留（不跳过）",
+                () -> TierHelper.pickBestIndexForTier(4,
+                        java.util.Arrays.asList(null, rl("t:x"))) == 0);
+        check("候选含 null 项且另有高门槛时，高门槛优先",
+                () -> {
+                    Config.clearAll();
+                    Config.addTier(rl("t:hi"), 3, SERVER);
+                    return TierHelper.pickBestIndexForTier(4,
+                            java.util.Arrays.asList(null, rl("t:hi"))) == 1;
+                });
+
+        orderingTests();
+    }
+
+    // =========================================================================
+    //  「顺序即选择」机器的排序回归（锯 / 工作盆走的就是这条）
+    // =========================================================================
+    //
+    //  这两台机器不是「返回一条」，而是拿到列表后用 list.get(0) 或
+    //  list.get(recipeIndex) 取用。所以 rankIndicesForTier 返回的**顺序**就是行为本身：
+    //  第 0 项必须是最高的那块，且同门槛时必须保持 Create 原有的相对顺序
+    //  （工作盆靠它承载「配料数越多越优先」）。之前这层没有断言。
+    // =========================================================================
+
+    /** 把下标序列映射回 id 字符串，便于断言顺序。 */
+    private static String order(int machineTier, List<ResourceLocation> list) {
+        StringBuilder sb = new StringBuilder();
+        for (int i : TierHelper.rankIndicesForTier(machineTier, list)) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(list.get(i).getPath());
+        }
+        return sb.toString();
+    }
+
+    private static void orderingTests() {
+        // 关键：高的排到最前，低的仍在列表里（黄铜机器要做得了 t1，不能整条丢掉）。
+        Config.clearAll();
+        Config.addTier(rl("o:t1"), 1, SERVER);
+        Config.addTier(rl("o:t2"), 2, SERVER);
+        List<ResourceLocation> t12 = ids("o:t1", "o:t2");
+
+        check("排序：下界级(2) 顺序为 t2,t1", () -> order(2, t12).equals("t2,t1"));
+        check("排序：黄铜级(1) 只剩 t1（顺序 t1）", () -> order(1, t12).equals("t1"));
+        check("排序：原版级(0) 两条都够不着 → 空序列", () -> order(0, t12).isEmpty());
+        check("排序：创造级(-1) 顺序为 t2,t1（取最高常规级）", () -> order(-1, t12).equals("t2,t1"));
+
+        // 稳定排序：同门槛必须保持原相对顺序（Create 自己的偏好编码在这里）。
+        Config.clearAll();
+        Config.addTier(rl("o:a"), 2, SERVER);
+        Config.addTier(rl("o:b"), 2, SERVER);
+        Config.addTier(rl("o:c"), 2, SERVER);
+        check("排序稳定性：同门槛三连保持原顺序 a,b,c",
+                () -> order(4, ids("o:a", "o:b", "o:c")).equals("a,b,c"));
+
+        // 高低交错时，稳定性体现在「同门槛那几条的相对次序不变」。
+        Config.clearAll();
+        Config.addTier(rl("o:low1"), 1, SERVER);
+        Config.addTier(rl("o:high1"), 3, SERVER);
+        Config.addTier(rl("o:low2"), 1, SERVER);
+        Config.addTier(rl("o:high2"), 3, SERVER);
+        check("排序：高门槛整体在前且各自保持原序 → high1,high2,low1,low2",
+                () -> order(4, ids("o:low1", "o:high1", "o:low2", "o:high2"))
+                        .equals("high1,high2,low1,low2"));
+
+        // 无门槛(0) 与带门槛混合：带门槛的在前，无门槛的仍保留可用。
+        Config.clearAll();
+        Config.addTier(rl("o:gated"), 2, SERVER);
+        check("排序：带门槛在前、无门槛在后 → gated,plain",
+                () -> order(2, ids("o:plain", "o:gated")).equals("gated,plain"));
+
+        // null id（反查失败）按无门槛处理，不丢失。
+        Config.clearAll();
+        Config.addTier(rl("o:gated"), 2, SERVER);
+        check("排序：null id 按无门槛保留且排在带门槛之后",
+                () -> TierHelper.rankIndicesForTier(2,
+                        java.util.Arrays.asList(null, rl("o:gated"))).size() == 2);
+        check("排序：null id 时下标 1（带门槛）在前",
+                () -> TierHelper.rankIndicesForTier(2,
+                        java.util.Arrays.asList(null, rl("o:gated"))).get(0) == 1);
+
+        // pickBestIndexForTier 必须与排序内核的第 0 项一致（两条路径不可发散）。
+        Config.clearAll();
+        Config.addTier(rl("o:p1"), 1, SERVER);
+        Config.addTier(rl("o:p2"), 4, SERVER);
+        List<ResourceLocation> p = ids("o:p1", "o:p2");
+        check("一致性：pickBestIndex == rankIndices 的第 0 项",
+                () -> TierHelper.pickBestIndexForTier(4, p) == 1
+                        && TierHelper.rankIndicesForTier(4, p).get(0) == 1);
+        check("一致性：够不着时 pickBestIndex 为 -1 且序列为空",
+                () -> TierHelper.pickBestIndexForTier(0, p) == -1
+                        && TierHelper.rankIndicesForTier(0, p).isEmpty());
+
+        // 边界：null / 空列表。
+        check("排序：null 列表 → 空序列", () -> TierHelper.rankIndicesForTier(4, null).isEmpty());
+        check("排序：空列表 → 空序列", () -> TierHelper.rankIndicesForTier(4, ids()).isEmpty());
     }
 
     private static ResourceLocation rl(String id) {

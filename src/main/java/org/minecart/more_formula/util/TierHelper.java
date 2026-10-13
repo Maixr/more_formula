@@ -2,16 +2,19 @@ package org.minecart.more_formula.util;
 
 import com.simibubi.create.AllRecipeTypes;
 import com.simibubi.create.content.fluids.transfer.FillingRecipe;
+import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeInput;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.items.wrapper.RecipeWrapper;
 import net.yxiao233.createmoremachines.api.content.mechanical.deployer.CMMDeployerBlockEntity;
 import net.yxiao233.createmoremachines.api.content.mechanical.mixer.CMMMechanicalMixerBlockEntity;
 import net.yxiao233.createmoremachines.api.content.mechanical.press.CMMMechanicalPressBlockEntity;
@@ -21,6 +24,9 @@ import org.minecart.more_formula.Config;
 import org.minecart.more_formula.More_formula;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 public class TierHelper {
 
@@ -138,6 +144,224 @@ public class TierHelper {
         int required = Config.getRequiredTier(recipeId);
         int tier = getMachineTier(machine);
         return isTierAllowed(tier, required);
+    }
+
+    // =========================================================================
+    //  「同输入多配方」择优
+    // =========================================================================
+    //
+    // 背景：Create 各机器选配方统一走
+    //     AllRecipeTypes.find(input, level)
+    //       → RecipeManager.getRecipeFor(type, input, level)
+    //       → byType(type).stream().filter(matches).findFirst()
+    // 也就是「取**注册顺序里第一条**匹配的配方」，与门槛完全无关。
+    //
+    // 于是同一输入写了 t1 / t2 两条 crushing 时，先注册的那条（t1）永远先命中；
+    // 旧实现只在返回值上问「这一条允许吗」—— 命中 t1 就放行 t1。用户可见的症状正是
+    // 「给下界粉碎轮喂料，出来的却是黄铜粉碎轮的产物」。
+    //
+    // 正确语义：候选集合 = 该输入下**所有**匹配的配方；先滤掉这台机器等级不够的；
+    // 剩下的取门槛**最高**的那条。全部不够 → 空（闸门拦截，与原行为一致）。
+    // 这样黄铜机器仍只做得了 t1，而下界机器会主动选 t2。
+    // =========================================================================
+
+    /**
+     * 门槛在「择优」时的排序权重。
+     *
+     * <p>常规等级就是其本身（越大越高级）。创造级（-1）是**独占**档而非阶梯顶端，
+     * 但在一台创造级机器上，若同一输入同时存在「常规最高级」和「创造专用」两条配方，
+     * 更该执行的是那条创造专用的 —— 因此把创造级排在所有常规等级之上。
+     */
+    public static int selectionRank(int requiredTier) {
+        return requiredTier == Config.CREATIVE_TIER ? Integer.MAX_VALUE : requiredTier;
+    }
+
+    /** 配方门槛（薄封装，便于离线测试与统一调用点）。 */
+    public static int requiredTierOf(ResourceLocation recipeId) {
+        return Config.getRequiredTier(recipeId);
+    }
+
+    /**
+     * 从候选里挑出该机器**实际应执行**的那一条：滤掉等级不够的，余下取门槛最高者。
+     * 并列时保留候选顺序里的第一条（贴近原版 findFirst 的确定性）。
+     */
+    public static <T extends Recipe<?>> Optional<RecipeHolder<T>> pickBestAllowed(
+            @Nullable BlockEntity machine, @Nullable List<RecipeHolder<T>> candidates) {
+        return pickBestAllowedForTier(getMachineTier(machine), candidates);
+    }
+
+    /**
+     * 纯函数内核：给定机器等级与候选配方，挑出应执行的那条。
+     *
+     * <p>抽出来是为了能离线断言 —— {@link #pickBestAllowed} 需要 BlockEntity 实例
+     * （离线构造不出来），而选择规则本身只跟「机器等级」这个整数有关。
+     */
+    public static <T extends Recipe<?>> Optional<RecipeHolder<T>> pickBestAllowedForTier(
+            int machineTier, @Nullable List<RecipeHolder<T>> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        int bestIndex = pickBestIndexForTier(machineTier, recipeIds(candidates));
+        return bestIndex < 0 ? Optional.empty() : Optional.ofNullable(candidates.get(bestIndex));
+    }
+
+    /**
+     * 最底层的纯函数：只吃「配方 id 列表」，返回选中项的下标；都不够时返回 -1。
+     *
+     * <p>这一层刻意不碰任何 Minecraft 类型 —— {@code Recipe} 的静态初始化要求游戏
+     * 注册表已 bootstrap（{@code BuiltInRegistries.<clinit>} 会抛
+     * "Not bootstrapped"），因此离线测试<b>无法</b>构造 {@code RecipeHolder}。
+     * 把规则下沉到「下标 + id 字符串」这一层，就能在纯 JVM 里断言选择逻辑。
+     */
+    public static int pickBestIndexForTier(int machineTier, @Nullable List<ResourceLocation> ids) {
+        List<Integer> ranked = rankIndicesForTier(machineTier, ids);
+        return ranked.isEmpty() ? -1 : ranked.get(0);
+    }
+
+    /**
+     * 纯函数：给定机器等级与候选配方 id，返回「这台机器可以执行」的候选下标，
+     * 并按门槛<b>从高到低</b>排好序；够不着的候选不出现。
+     *
+     * <p>这是所有「顺序即选择」机器的共同内核：
+     * <ul>
+     *   <li>取单条的机器（压机、破碎轮）：用返回序列的<b>第 0 个</b>；</li>
+     *   <li>取列表的机器（锯、工作盆 {@code list.get(0)}）：按返回序列重排整个列表。</li>
+     * </ul>
+     *
+     * <p>排序是<b>稳定</b>的：门槛相同时保留下标的小到大顺序（= 原候选顺序），
+     * 因此不会打乱 Create 自己编码在顺序里的其它偏好（例如工作盆按配料数排序）。
+     * 只有当门槛确实不同时，取用结果才会改变。
+     *
+     * <p>刻意不碰任何 Minecraft 类型，便于离线断言 —— {@code Recipe} 的静态初始化
+     * 要求游戏注册表已 bootstrap，离线构造 {@code RecipeHolder} 会抛
+     * "Not bootstrapped"。
+     */
+    public static List<Integer> rankIndicesForTier(int machineTier, @Nullable List<ResourceLocation> ids) {
+        List<Integer> out = new ArrayList<>();
+        if (ids == null || ids.isEmpty()) {
+            return out;
+        }
+        // 收集「够得着」的候选下标，保持原顺序。
+        // null id = 查不到门槛（例如反查失败）→ 按「无门槛」处理，与旧行为一致
+        // （旧代码就是 `id == null || isTierAllowed(...)` 即视为放行）。
+        List<Integer> allowed = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            if (isTierAllowed(machineTier, requiredOrZero(ids.get(i)))) {
+                allowed.add(i);
+            }
+        }
+        // 按门槛降序稳定排序：同 rank 保留原下标顺序（= Create 原有的相对偏好）。
+        allowed.sort((ia, ib) -> Integer.compare(
+                selectionRank(requiredOrZero(ids.get(ib))),
+                selectionRank(requiredOrZero(ids.get(ia)))));
+        out.addAll(allowed);
+        return out;
+    }
+
+    private static <T extends Recipe<?>> List<ResourceLocation> recipeIds(List<RecipeHolder<T>> candidates) {
+        List<ResourceLocation> ids = new ArrayList<>(candidates.size());
+        for (RecipeHolder<T> holder : candidates) {
+            ids.add(holder == null ? null : holder.id());
+        }
+        return ids;
+    }
+
+    private static int requiredOrZero(@Nullable ResourceLocation id) {
+        return id == null ? 0 : Config.getRequiredTier(id);
+    }
+
+    /**
+     * 把「同一输入的多个候选」按等级降序就地重排，并滤掉该机器等级不够的。
+     *
+     * <p>给「取列表第 0 项」的机器用（工作盆 {@code updateBasin} 用
+     * {@code list.get(0)} 定 currentRecipe）。排序是稳定的：同等级的候选保持
+     * Create 原有的相对顺序，因此只在等级确实不同时才改变取用结果。
+     *
+     * <p>工作盆拿到的是 {@code List<Recipe<?>>}（没有 RecipeHolder），配方 id 需要
+     * 反查；反查不到（{@code id == null}）时按「无门槛」处理并保留在列表里 ——
+     * 与原行为一致。
+     */
+    public static List<Recipe<?>> sortMatchingByTier(Level level, BlockEntity machine, List<Recipe<?>> recipes) {
+        List<Recipe<?>> out = new ArrayList<>();
+        if (recipes == null || recipes.isEmpty()) {
+            return out;
+        }
+        int machineTier = getMachineTier(machine);
+        // 反查每个候选的 id（反查不到 → null，按无门槛处理）。
+        List<ResourceLocation> ids = new ArrayList<>(recipes.size());
+        for (Recipe<?> recipe : recipes) {
+            ids.add(findRecipeId(level, recipe));
+        }
+        // 复用同一个纯函数内核：滤掉够不着的 + 按门槛降序稳定排序。
+        List<Integer> order = rankIndicesForTier(machineTier, ids);
+        for (int i : order) {
+            out.add(recipes.get(i));
+        }
+        return out;
+    }
+
+    /**
+     * 该输入下**所有**匹配的配方（不按门槛过滤）。
+     *
+     * <p>Create 的 {@code find} 只回一条（{@code byType().filter(matches).findFirst()}），
+     * 这里要的是全集，所以直接问 {@code RecipeManager.getRecipesFor} —— 它内部同样是
+     * {@code byType(type).filter(matches)}，用同一个 {@code matches} 判定，只是不 findFirst。
+     */
+    public static <I extends RecipeInput, T extends Recipe<I>> List<RecipeHolder<T>> matchingRecipes(
+            Level level, RecipeType<T> type, I input) {
+        return level.getRecipeManager().getRecipesFor(type, input, level);
+    }
+
+    /**
+     * 破碎轮控制器的完整候选池：**先 crushing、后 milling**。
+     *
+     * <p>顺序刻意如此：本模组择优时并列取「候选里第一条」，而 Create 原生优先级是
+     * 「有 crushing 就不看 milling」。两者合起来 = 同门槛时仍优先 crushing，
+     * 但**门槛更高的一方会胜出** —— 这正是本次修复要的行为（同一输入写了 t1/t2 两条
+     * crushing 时，等级够的机器必须执行 t2，而不是先注册的 t1）。
+     *
+     * <p>为什么用裸类型 + 强转：{@code findRecipe} 的声明类型是
+     * {@code StandardProcessingRecipe<RecipeWrapper>}，而 crushing/milling 的实际类继承
+     * {@code StandardProcessingRecipe<RecipeInput>}（见 6.0.10 的
+     * {@code AbstractCrushingRecipe}）。泛型擦除后是同一个类，Create 自己在
+     * {@code AllRecipeTypes.find} 里也是这么强转的，这里照做。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static List<RecipeHolder<StandardProcessingRecipe<RecipeWrapper>>> crushingCandidates(
+            Level level, RecipeWrapper input) {
+        List<RecipeHolder<StandardProcessingRecipe<RecipeWrapper>>> out = new ArrayList<>();
+        collectInto(out, level, AllRecipeTypes.CRUSHING, input);
+        collectInto(out, level, AllRecipeTypes.MILLING, input);
+        return out;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void collectInto(List<RecipeHolder<StandardProcessingRecipe<RecipeWrapper>>> out,
+                                    Level level, AllRecipeTypes type, RecipeWrapper input) {
+        List<RecipeHolder<?>> found = level.getRecipeManager().getRecipesFor((RecipeType) type.getType(), input, level);
+        for (RecipeHolder<?> holder : found) {
+            out.add((RecipeHolder<StandardProcessingRecipe<RecipeWrapper>>) holder);
+        }
+    }
+
+    /**
+     * 该输入下所有匹配的 milling 配方（磨石用）。
+     *
+     * <p>返回类型写 {@code AbstractCrushingRecipe} 是刻意的：{@code MillingRecipe}
+     * 继承自它，而磨石 {@code process()} 里原调用返回的就是
+     * {@code Optional<RecipeHolder<MillingRecipe>>}；泛型擦除后都是
+     * {@code RecipeHolder}，择优逻辑只读 {@code holder.id()}，因此用哪个上界都安全。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static List<RecipeHolder<com.simibubi.create.content.kinetics.crusher.AbstractCrushingRecipe>> millingRecipes(
+            Level level, RecipeWrapper input) {
+        List<RecipeHolder<com.simibubi.create.content.kinetics.crusher.AbstractCrushingRecipe>> out = new ArrayList<>();
+        List<RecipeHolder<?>> found = level.getRecipeManager()
+                .getRecipesFor((RecipeType) AllRecipeTypes.MILLING.getType(), input, level);
+        for (RecipeHolder<?> holder : found) {
+            out.add((RecipeHolder<com.simibubi.create.content.kinetics.crusher.AbstractCrushingRecipe>) holder);
+        }
+        return out;
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
