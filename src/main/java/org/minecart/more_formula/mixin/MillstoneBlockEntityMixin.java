@@ -79,7 +79,7 @@ public abstract class MillstoneBlockEntityMixin {
                 strictestRequired = required;
             }
         }
-        if (anyMatch && !TierHelper.isTierAllowed(TierHelper.getMachineTier(machine), strictestRequired)) {
+        if (anyMatch && !TierHelper.isTierAllowed(TierHelper.getAdmissionTier(machine), strictestRequired)) {
             cir.setReturnValue(false);
         }
     }

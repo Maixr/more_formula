@@ -21,7 +21,9 @@ import net.yxiao233.createmoremachines.api.content.mechanical.press.CMMMechanica
 import net.yxiao233.createmoremachines.api.content.spout.CMMSpoutBlockEntity;
 import org.jetbrains.annotations.Nullable;
 import org.minecart.more_formula.Config;
+import org.minecart.more_formula.MachinePriority;
 import org.minecart.more_formula.More_formula;
+import org.minecart.more_formula.PriorityRules;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -50,7 +52,13 @@ public class TierHelper {
     private static volatile Method cmmmTierMethod;
     private static boolean cmmmBridgeWarned;
 
-    public static int getMachineTier(@Nullable BlockEntity machine) {
+    /**
+     * 机器的<b>真实等级</b>（CMM/CMMM 出厂等级，原版机器为 0）。
+     *
+     * <p>这个值不受玩家手动设定的「运行等级」影响 —— 处理速度、并行倍率等
+     * CMM 自身机制用的也是它，所以调运行等级不会改变那些。
+     */
+    public static int getRealMachineTier(@Nullable BlockEntity machine) {
         if (machine == null) {
             return 0;
         }
@@ -67,14 +75,69 @@ public class TierHelper {
             // 原版 Create 机器（或任何非 CMM 方块实体）视为 0 级。
             // 注意这里**不**处理 CMM 的锯：CMM 2.7 没有发布任何锯方块
             // （只有未启用的 API 类），因此不存在需要识别的锯机器。
-            // CMMM 的分级破碎轮/锯是可选依赖，经 {@link #externalMachineTier} 识别。
+            // CMMM 的分级破碎轮/锯/鼓风机是可选依赖，经 {@link #externalMachineTier} 识别。
             return externalMachineTier(machine);
         }
         return toFormulaTier(cmmTier);
     }
 
     /**
-     * 识别可选依赖 CreateMoreMoreMachines 的机器（分级破碎轮/锯）并换算等级。
+     * 玩家的手动「运行等级」；未设置时返回 {@link MachinePriority#UNSET}。
+     */
+    public static int getRunningTier(@Nullable BlockEntity machine) {
+        if (machine == null) {
+            return MachinePriority.UNSET;
+        }
+        return MachinePriority.getRaw(machine);
+    }
+
+    /**
+     * <b>准入门槛</b>用的等级（决定「哪些配方能做」）。
+     *
+     * <ul>
+     *   <li>未手动设置 → 真实等级（= 与旧行为完全一致，旧存档无变化）。</li>
+     *   <li>已手动设置 → 该运行等级（因此调低后做不了高于它的配方）。</li>
+     *   <li><b>创造级机器例外</b>：准入恒为创造级（-1），即<b>不受手动值影响</b> ——
+     *       需求确认过「创造机器可调，但不影响准入、只影响择优」。</li>
+     * </ul>
+     */
+    public static int getAdmissionTier(@Nullable BlockEntity machine) {
+        int real = getRealMachineTier(machine);
+        if (real == Config.CREATIVE_TIER) {
+            return Config.CREATIVE_TIER;
+        }
+        int run = getRunningTier(machine);
+        return run == MachinePriority.UNSET ? real : run;
+    }
+
+    /**
+     * <b>择优偏好</b>用的等级（决定「同一输入的多个配方选哪条」）。
+     *
+     * <p>与准入等级的区别只在创造级机器：创造机器的准入不受限，但择优仍按手动值
+     * （所以把创造机器调成黄铜，它会优先挑黄铜档的配方，而不是挑最高的）。
+     *
+     * <p>未手动设置时返回真实等级；创造级真实等级为 -1，恰好表达
+     * 「只把创造专用配方排在前面、其余按等级降序」这一原有的择优行为。
+     */
+    public static int getSelectionTier(@Nullable BlockEntity machine) {
+        int run = getRunningTier(machine);
+        if (run != MachinePriority.UNSET) {
+            return run;
+        }
+        return getRealMachineTier(machine);
+    }
+
+    /**
+     * @deprecated 语义已被拆分，请按用途改用 {@link #getAdmissionTier}（准入）
+     * 或 {@link #getSelectionTier}（择优）。保留它只是为了不破坏既有调用点的编译。
+     */
+    @Deprecated
+    public static int getMachineTier(@Nullable BlockEntity machine) {
+        return getAdmissionTier(machine);
+    }
+
+    /**
+     * 识别可选依赖 CreateMoreMoreMachines 的机器（分级破碎轮/锯/鼓风机）并换算等级。
      *
      * <p>为什么不直接 instanceof：本类在主 mixin 配置（不门控）里被引用，
      * 任何对 CMMM 类型的直接引用都会在未安装该模组时抛 NoClassDefFoundError。
@@ -142,7 +205,7 @@ public class TierHelper {
 
     public static boolean isAllowed(@Nullable BlockEntity machine, ResourceLocation recipeId) {
         int required = Config.getRequiredTier(recipeId);
-        int tier = getMachineTier(machine);
+        int tier = getAdmissionTier(machine);
         return isTierAllowed(tier, required);
     }
 
@@ -187,7 +250,41 @@ public class TierHelper {
      */
     public static <T extends Recipe<?>> Optional<RecipeHolder<T>> pickBestAllowed(
             @Nullable BlockEntity machine, @Nullable List<RecipeHolder<T>> candidates) {
-        return pickBestAllowedForTier(getMachineTier(machine), candidates);
+        // 择优同时受两件事约束：
+        //  - 准入：够不着的配方不能选（用 getAdmissionTier）
+        //  - 偏好：够得着的里面优先挑「运行等级」那一档（用 getSelectionTier）
+        // 两者对普通机器是同一个值；只有创造级机器会分叉（准入恒为 -1、偏好随手动值）。
+        // 实现上取「准入等级」做过滤、用「偏好等级」做排序权重，因此这里传偏好等级，
+        // 但过滤那一步必须用准入等级 —— 见 pickBestByTiers。
+        return pickBestByTiers(getAdmissionTier(machine), getSelectionTier(machine), candidates);
+    }
+
+    /**
+     * 择优内核（同时吃「准入等级」与「偏好等级」两个值）。
+     *
+     * <p>对普通机器两个参数相同；创造级机器准入恒为 -1（通行一切）、偏好随手动值。
+     */
+    public static <T extends Recipe<?>> Optional<RecipeHolder<T>> pickBestByTiers(
+            int admissionTier, int selectionTier, @Nullable List<RecipeHolder<T>> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        int bestIndex = pickBestIndexByTiers(admissionTier, selectionTier, recipeIds(candidates));
+        return bestIndex < 0 ? Optional.empty() : Optional.ofNullable(candidates.get(bestIndex));
+    }
+
+    /**
+     * 最底层的纯函数：只吃「配方 id 列表」，返回选中项的下标；都不够时返回 -1。
+     *
+     * <p>刻意不碰任何 Minecraft 类型，便于离线断言 —— {@code Recipe} 的静态初始化
+     * 要求游戏注册表已 bootstrap，离线构造 {@code RecipeHolder} 会抛
+     * "Not bootstrapped"。
+     */
+    public static int pickBestIndexByTiers(
+            int admissionTier, int selectionTier, @Nullable List<ResourceLocation> ids) {
+        // 与排序内核共用同一套规则，避免两条路径发散。
+        List<Integer> ranked = rankIndicesForTiers(admissionTier, selectionTier, ids);
+        return ranked.isEmpty() ? -1 : ranked.get(0);
     }
 
     /**
@@ -237,25 +334,55 @@ public class TierHelper {
      * "Not bootstrapped"。
      */
     public static List<Integer> rankIndicesForTier(int machineTier, @Nullable List<ResourceLocation> ids) {
+        // 单参数的兼容入口：准入与偏好取同一个值（对普通机器就是真实情况）。
+        return rankIndicesForTiers(machineTier, machineTier, ids);
+    }
+
+    /**
+     * 排序内核（准入 + 偏好两个等级）：滤掉够不着的，其余按「偏好权重」降序稳定排序。
+     *
+     * <p>给「取列表第 0 项」或「按下标取用」的机器用（锯、工作盆）。
+     */
+    public static List<Integer> rankIndicesForTiers(
+            int admissionTier, int selectionTier, @Nullable List<ResourceLocation> ids) {
         List<Integer> out = new ArrayList<>();
         if (ids == null || ids.isEmpty()) {
             return out;
         }
         // 收集「够得着」的候选下标，保持原顺序。
-        // null id = 查不到门槛（例如反查失败）→ 按「无门槛」处理，与旧行为一致
-        // （旧代码就是 `id == null || isTierAllowed(...)` 即视为放行）。
+        // null id = 查不到门槛（例如反查失败）→ 按「无门槛」处理，与旧行为一致。
         List<Integer> allowed = new ArrayList<>();
         for (int i = 0; i < ids.size(); i++) {
-            if (isTierAllowed(machineTier, requiredOrZero(ids.get(i)))) {
+            if (isTierAllowed(admissionTier, requiredOrZero(ids.get(i)))) {
                 allowed.add(i);
             }
         }
-        // 按门槛降序稳定排序：同 rank 保留原下标顺序（= Create 原有的相对偏好）。
+        // 按偏好权重降序稳定排序：同权重保留原下标顺序（= Create 原有的相对偏好）。
         allowed.sort((ia, ib) -> Integer.compare(
-                selectionRank(requiredOrZero(ids.get(ib))),
-                selectionRank(requiredOrZero(ids.get(ia)))));
+                selectionWeight(requiredOrZero(ids.get(ib)), selectionTier),
+                selectionWeight(requiredOrZero(ids.get(ia)), selectionTier)));
         out.addAll(allowed);
         return out;
+    }
+
+    /**
+     * 择优权重：越大越优先。这是「同输入多配方选谁」的唯一规则。
+     *
+     * <ul>
+     *   <li><b>偏好等级为创造档</b>（{@code selectionTier == -1}，即创造机器未手动设置）：
+     *       创造专用配方（{@code required == -1}）优先，其余按门槛降序。
+     *       这与本模组原有的择优行为一致（既有回归测试锁定）。</li>
+     *   <li><b>偏好等级为普通档 0..4</b>：优先「尽可能贴近但不超过该档」的配方 ——
+     *       即玩家把机器调成黄铜，就会优先挑黄铜档的配方。
+     *       创造专用配方排最后（普通机器本来就做不了它）。</li>
+     * </ul>
+     *
+     * <p>权重区间刻意分离（正数千 / 负数千），保证「≤ 偏好档」的候选永远压过
+     * 「> 偏好档」的候选；同档内部再按差距排序。
+     */
+    public static int selectionWeight(int requiredTier, int selectionTier) {
+        // 规则本体在 PriorityRules（纯函数、可离线断言），这里只转发以免两处漂移。
+        return PriorityRules.selectionWeight(requiredTier, selectionTier);
     }
 
     private static <T extends Recipe<?>> List<ResourceLocation> recipeIds(List<RecipeHolder<T>> candidates) {
@@ -286,14 +413,15 @@ public class TierHelper {
         if (recipes == null || recipes.isEmpty()) {
             return out;
         }
-        int machineTier = getMachineTier(machine);
+        int machineTier = getAdmissionTier(machine);
+        int preferTier = getSelectionTier(machine);
         // 反查每个候选的 id（反查不到 → null，按无门槛处理）。
         List<ResourceLocation> ids = new ArrayList<>(recipes.size());
         for (Recipe<?> recipe : recipes) {
             ids.add(findRecipeId(level, recipe));
         }
-        // 复用同一个纯函数内核：滤掉够不着的 + 按门槛降序稳定排序。
-        List<Integer> order = rankIndicesForTier(machineTier, ids);
+        // 复用同一个纯函数内核：滤掉够不着的 + 按偏好权重降序稳定排序。
+        List<Integer> order = rankIndicesForTiers(machineTier, preferTier, ids);
         for (int i : order) {
             out.add(recipes.get(i));
         }
@@ -379,7 +507,7 @@ public class TierHelper {
 
     public static boolean isFillingAllowed(BlockEntity machine, Level level, ItemStack stack, @Nullable FluidStack availableFluid) {
         int required = getRequiredFillingTier(level, stack, availableFluid);
-        int tier = getMachineTier(machine);
+        int tier = getAdmissionTier(machine);
         return isTierAllowed(tier, required);
     }
 

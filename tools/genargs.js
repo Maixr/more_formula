@@ -146,6 +146,12 @@ const CP = [
   cached('org.apache.logging.log4j', 'log4j-slf4j2-impl', '2.22.1'),
   cached('org.jetbrains', 'annotations', '24.1.0'),
   cached('org.joml', 'joml', '1.10.5'),
+  // netty-buffer 是**编译期**就需要的：Minecraft 的 FriendlyByteBuf
+  // extends io.netty.buffer.ByteBuf（已用 javap 确认），所以任何用到
+  // 网络缓冲区类型的代码（例如 Data Attachment 的 sync 序列化）在编译时
+  // 必须有 netty 在类路径上。Gradle 从 MC 依赖传递拿到它，手工链必须显式列。
+  cached('io.netty', 'netty-buffer', '4.1.97.Final'),
+  cached('io.netty', 'netty-common', '4.1.97.Final'),
 ];
 
 // Maven 坐标的编译期依赖：Create / ponder / Registrate / flywheel API / JEI API /

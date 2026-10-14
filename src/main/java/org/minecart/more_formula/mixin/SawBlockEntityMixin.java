@@ -51,12 +51,13 @@ public abstract class SawBlockEntityMixin {
         BlockEntity machine = (BlockEntity) (Object) this;
 
         // 1) 取出每个候选的 id，交给 TierHelper 的统一内核：
-        //    滤掉这台机器够不着的 + 按门槛降序稳定排序。
+        //    按「准入等级」滤掉够不着的 + 按「运行等级」偏好降序稳定排序。
         List<ResourceLocation> ids = new ArrayList<>(recipes.size());
         for (RecipeHolder<? extends Recipe<?>> holder : recipes) {
             ids.add(holder == null ? null : holder.id());
         }
-        List<Integer> order = TierHelper.rankIndicesForTier(TierHelper.getMachineTier(machine), ids);
+        List<Integer> order = TierHelper.rankIndicesForTiers(
+                TierHelper.getAdmissionTier(machine), TierHelper.getSelectionTier(machine), ids);
         if (order.isEmpty()) {
             cir.setReturnValue(List.of());
             return;
